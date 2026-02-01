@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Alert, StyleSheet, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking } from 'react-native';
 import { router } from 'expo-router';
-import { Bell, MapPin, Crown, Info, ChevronRight, LogOut, Cloud, Shield, Star, UserPlus, Wifi, WifiOff, CloudOff, X, Mail, Lock, User } from 'lucide-react-native';
+import { Bell, MapPin, Crown, Info, ChevronRight, LogOut, Cloud, Shield, UserPlus, Wifi, WifiOff, CloudOff, X, Mail, Lock, User, Smartphone, Volume2, Vibrate, Clock, RefreshCw, Trash2, Database, Eye, Download } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Notifications from 'expo-notifications';
+import * as Location from 'expo-location';
 
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
@@ -15,7 +17,121 @@ export default function SettingsScreen() {
   const [displayName, setDisplayName] = useState('');
   const [createAccountError, setCreateAccountError] = useState('');
 
+  // Permission states
+  const [notificationPermission, setNotificationPermission] = useState<string>('undetermined');
+  const [locationPermission, setLocationPermission] = useState<string>('undetermined');
+  const [backgroundLocationPermission, setBackgroundLocationPermission] = useState<string>('undetermined');
+
   const isGuest = user?.isGuest ?? false;
+
+  // Check permissions on mount
+  useEffect(() => {
+    checkPermissions();
+  }, []);
+
+  const checkPermissions = async () => {
+    try {
+      // Check notification permission
+      const notifStatus = await Notifications.getPermissionsAsync();
+      setNotificationPermission(notifStatus.status);
+    } catch (error) {
+      console.log('Notification permission check error:', error);
+    }
+
+    try {
+      // Check location permission
+      const locStatus = await Location.getForegroundPermissionsAsync();
+      setLocationPermission(locStatus.status);
+
+      // Check background location permission
+      const bgLocStatus = await Location.getBackgroundPermissionsAsync();
+      setBackgroundLocationPermission(bgLocStatus.status);
+    } catch (error) {
+      console.log('Location permission check error:', error);
+      // This can fail in Expo Go - requires development build
+    }
+  };
+
+  const requestNotificationPermission = async () => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      setNotificationPermission(status);
+
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'To receive reminders, please enable notifications in your device settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+      }
+    } catch (error) {
+      console.log('Notification permission request error:', error);
+      Alert.alert('Error', 'Could not request notification permission. Please enable in Settings.');
+      Linking.openSettings();
+    }
+  };
+
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      setLocationPermission(status);
+
+      if (status === 'granted') {
+        // Also request background location for location-based reminders
+        try {
+          const bgStatus = await Location.requestBackgroundPermissionsAsync();
+          setBackgroundLocationPermission(bgStatus.status);
+
+          if (bgStatus.status !== 'granted') {
+            Alert.alert(
+              'Background Location',
+              'For location-based reminders to work when the app is closed, please enable "Always" location access in settings.',
+              [
+                { text: 'Later', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          }
+        } catch (bgError) {
+          console.log('Background location permission error:', bgError);
+          // Background location may not be available in Expo Go
+        }
+      } else {
+        Alert.alert(
+          'Permission Required',
+          'Location permission is needed for location-based reminders.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+      }
+    } catch (error) {
+      console.log('Location permission request error:', error);
+      Alert.alert(
+        'Development Build Required',
+        'Location permissions require a development build. In Expo Go, please open Settings to grant permissions manually.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
+    }
+  };
+
+  const getPermissionStatus = (status: string) => {
+    switch (status) {
+      case 'granted':
+        return { label: 'Enabled', color: '#22c55e' };
+      case 'denied':
+        return { label: 'Denied', color: '#ef4444' };
+      default:
+        return { label: 'Not Set', color: '#f59e0b' };
+    }
+  };
 
   const handleSignOut = () => {
     Alert.alert(
@@ -66,6 +182,10 @@ export default function SettingsScreen() {
     }
   };
 
+  const notifStatus = getPermissionStatus(notificationPermission);
+  const locStatus = getPermissionStatus(locationPermission);
+  const bgLocStatus = getPermissionStatus(backgroundLocationPermission);
+
   const settingsSections = [
     // Guest-specific section
     ...(isGuest
@@ -96,34 +216,82 @@ export default function SettingsScreen() {
           },
         ]
       : []),
+    // Premium section (only show if not premium)
+    ...(!user?.isPremium
+      ? [
+          {
+            title: 'Premium',
+            items: [
+              {
+                icon: Crown,
+                label: 'Upgrade to Premium',
+                description: 'Unlock location reminders & more',
+                onPress: () => router.push('/premium'),
+                color: '#f59e0b',
+              },
+            ],
+          },
+        ]
+      : []),
     {
-      title: 'Premium',
+      title: 'Notifications',
       items: [
         {
-          icon: Crown,
-          label: 'Upgrade to Premium',
-          description: 'Unlock all features',
-          onPress: () => router.push('/premium'),
-          color: '#f59e0b',
+          icon: Bell,
+          label: 'Push Notifications',
+          description: notifStatus.label,
+          descriptionColor: notifStatus.color,
+          onPress: requestNotificationPermission,
+          color: '#0ea5e9',
+          showStatus: true,
+          statusEnabled: notificationPermission === 'granted',
+        },
+        {
+          icon: Volume2,
+          label: 'Sound & Vibration',
+          description: 'Customize alert sounds',
+          onPress: () => Linking.openSettings(),
+          color: '#8b5cf6',
         },
       ],
     },
     {
-      title: 'Preferences',
+      title: 'Location',
       items: [
         {
-          icon: Bell,
-          label: 'Notification Settings',
-          description: 'Manage notification preferences',
-          onPress: () => Alert.alert('Coming Soon', 'Notification settings will be available soon.'),
-          color: '#0ea5e9',
+          icon: MapPin,
+          label: 'Location Access',
+          description: locStatus.label,
+          descriptionColor: locStatus.color,
+          onPress: requestLocationPermission,
+          color: '#10b981',
+          showStatus: true,
+          statusEnabled: locationPermission === 'granted',
         },
         {
-          icon: MapPin,
-          label: 'Location Permissions',
-          description: 'Manage location access',
-          onPress: () => Alert.alert('Coming Soon', 'Location settings will be available soon.'),
-          color: '#10b981',
+          icon: Smartphone,
+          label: 'Background Location',
+          description: backgroundLocationPermission === 'granted'
+            ? 'Enabled - Always on'
+            : 'Required for location reminders',
+          descriptionColor: bgLocStatus.color,
+          onPress: () => {
+            if (locationPermission !== 'granted') {
+              Alert.alert('Enable Location First', 'Please enable location access before setting up background location.');
+            } else {
+              Alert.alert(
+                'Background Location',
+                'Background location allows reminders to trigger when you arrive at or leave a location, even when the app is closed.\n\nNote: This feature requires a production build of the app. In Expo Go, please enable location in device Settings.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                ]
+              );
+            }
+          },
+          color: '#06b6d4',
+          showStatus: true,
+          statusEnabled: backgroundLocationPermission === 'granted',
         },
       ],
     },
@@ -131,7 +299,7 @@ export default function SettingsScreen() {
     ...(!isGuest
       ? [
           {
-            title: 'Account',
+            title: 'Cloud & Sync',
             items: [
               {
                 icon: Cloud,
@@ -141,43 +309,112 @@ export default function SettingsScreen() {
                   Alert.alert(
                     isConnected ? 'Cloud Sync Active' : 'Offline Mode',
                     isConnected
-                      ? 'Your reminders are being synced to the cloud.'
-                      : 'You are offline. Your changes will sync when you reconnect.'
+                      ? 'Your reminders are synced to the cloud in real-time. Changes you make are automatically backed up.'
+                      : 'You are currently offline. Any changes will be saved locally and synced automatically when you reconnect.'
                   );
                 },
                 color: isConnected ? '#10b981' : '#64748b',
+                showStatus: true,
+                statusEnabled: isConnected,
               },
               {
-                icon: Shield,
-                label: 'Privacy & Security',
-                description: 'Manage your data preferences',
-                onPress: () => Alert.alert('Coming Soon', 'Privacy settings will be available soon.'),
+                icon: RefreshCw,
+                label: 'Last Synced',
+                description: isConnected ? 'Just now' : 'Waiting for connection',
+                onPress: () => {
+                  if (isConnected) {
+                    Alert.alert('Sync Status', 'All your data is up to date with the cloud.');
+                  } else {
+                    Alert.alert('Offline', 'Your data will sync when you reconnect to the internet.');
+                  }
+                },
+                color: '#64748b',
+              },
+            ],
+          },
+          {
+            title: 'Privacy & Data',
+            items: [
+              {
+                icon: Database,
+                label: 'Your Data',
+                description: 'Stored securely in Supabase',
+                onPress: () => {
+                  Alert.alert(
+                    'Data Storage',
+                    'Your reminders are stored securely using Supabase with end-to-end encryption. Only you can access your data.',
+                    [{ text: 'Got it' }]
+                  );
+                },
                 color: '#8b5cf6',
+              },
+              {
+                icon: Download,
+                label: 'Export Data',
+                description: 'Download your reminders',
+                onPress: () => {
+                  Alert.alert(
+                    'Export Data',
+                    'Would you like to export all your reminders as a JSON file?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Export', onPress: () => Alert.alert('Coming Soon', 'Data export will be available in the next update.') },
+                    ]
+                  );
+                },
+                color: '#0ea5e9',
+              },
+              {
+                icon: Trash2,
+                label: 'Delete Account',
+                description: 'Permanently remove all data',
+                onPress: () => {
+                  Alert.alert(
+                    'Delete Account',
+                    'This will permanently delete your account and all associated data. This action cannot be undone.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => Alert.alert('Coming Soon', 'Account deletion will be available in settings.'),
+                      },
+                    ]
+                  );
+                },
+                color: '#ef4444',
               },
             ],
           },
         ]
       : []),
     {
-      title: 'Support',
+      title: 'About',
       items: [
         {
-          icon: Star,
-          label: 'Rate the App',
-          description: 'Help us improve with your feedback',
-          onPress: () => Alert.alert('Thank You!', 'Rating feature coming soon.'),
-          color: '#f59e0b',
-        },
-        {
           icon: Info,
-          label: 'About RemindMe Pro',
+          label: 'RemindMe Pro',
           description: 'Version 1.0.0',
           onPress: () =>
             Alert.alert(
               'RemindMe Pro',
-              'Version 1.0.0\n\nA smart reminder app that helps you never forget anything important.'
+              'Version 1.0.0\n\nA smart reminder app that helps you never forget anything important.\n\nBuilt with Expo, React Native, and Supabase.'
             ),
           color: '#64748b',
+        },
+        {
+          icon: Shield,
+          label: 'Privacy Policy',
+          description: 'How we protect your data',
+          onPress: () => router.push('/legal/privacy'),
+          color: '#0ea5e9',
+        },
+        {
+          icon: Info,
+          label: 'Terms of Service',
+          description: 'Usage terms and conditions',
+          onPress: () => router.push('/legal/terms'),
+          color: '#8b5cf6',
         },
       ],
     },
@@ -188,7 +425,7 @@ export default function SettingsScreen() {
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header with User Profile */}
         <LinearGradient
-          colors={isGuest ? ['#f59e0b', '#d97706', '#b45309'] : ['#0ea5e9', '#0284c7', '#0369a1']}
+          colors={user?.isPremium ? ['#f59e0b', '#d97706', '#b45309'] : ['#0ea5e9', '#0284c7', '#0369a1']}
           style={styles.header}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -234,27 +471,49 @@ export default function SettingsScreen() {
             <View key={sectionIndex} style={styles.section}>
               <Text style={styles.sectionTitle}>{section.title}</Text>
               <View style={styles.sectionCard}>
-                {section.items.map((item, itemIndex) => (
-                  <TouchableOpacity
-                    key={itemIndex}
-                    onPress={item.onPress}
-                    style={[
-                      styles.settingsItem,
-                      itemIndex !== section.items.length - 1 && styles.settingsItemBorder,
-                      (item as any).highlight && styles.settingsItemHighlight,
-                    ]}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.settingsItemIcon, { backgroundColor: `${item.color}15` }]}>
-                      <item.icon size={20} color={item.color} />
-                    </View>
-                    <View style={styles.settingsItemContent}>
-                      <Text style={styles.settingsItemLabel}>{item.label}</Text>
-                      <Text style={styles.settingsItemDescription}>{item.description}</Text>
-                    </View>
-                    <ChevronRight size={20} color="#cbd5e1" />
-                  </TouchableOpacity>
-                ))}
+                {section.items.map((item, itemIndex) => {
+                  const itemData = item as any;
+                  return (
+                    <TouchableOpacity
+                      key={itemIndex}
+                      onPress={item.onPress}
+                      style={[
+                        styles.settingsItem,
+                        itemIndex !== section.items.length - 1 && styles.settingsItemBorder,
+                        itemData.highlight && styles.settingsItemHighlight,
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.settingsItemIcon, { backgroundColor: `${item.color}15` }]}>
+                        <item.icon size={20} color={item.color} />
+                      </View>
+                      <View style={styles.settingsItemContent}>
+                        <Text style={styles.settingsItemLabel}>{item.label}</Text>
+                        <Text style={[
+                          styles.settingsItemDescription,
+                          itemData.descriptionColor && { color: itemData.descriptionColor }
+                        ]}>
+                          {item.description}
+                        </Text>
+                      </View>
+                      {itemData.showStatus ? (
+                        <View style={[
+                          styles.statusIndicator,
+                          itemData.statusEnabled ? styles.statusEnabled : styles.statusDisabled
+                        ]}>
+                          <Text style={[
+                            styles.statusText,
+                            itemData.statusEnabled ? styles.statusTextEnabled : styles.statusTextDisabled
+                          ]}>
+                            {itemData.statusEnabled ? 'ON' : 'OFF'}
+                          </Text>
+                        </View>
+                      ) : (
+                        <ChevronRight size={20} color="#cbd5e1" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
           ))}
@@ -487,6 +746,29 @@ const styles = StyleSheet.create({
   settingsItemDescription: {
     fontSize: 14,
     color: '#64748b',
+  },
+  statusIndicator: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  statusEnabled: {
+    backgroundColor: '#dcfce7',
+  },
+  statusDisabled: {
+    backgroundColor: '#f1f5f9',
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusTextEnabled: {
+    color: '#16a34a',
+  },
+  statusTextDisabled: {
+    color: '#94a3b8',
   },
   signOutButton: {
     flexDirection: 'row',

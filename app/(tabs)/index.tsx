@@ -4,12 +4,15 @@ import { router } from 'expo-router';
 import { Plus, Calendar, Clock, Bell, CheckCircle2, Sparkles, TrendingUp, Wifi, WifiOff, CloudOff, UserPlus } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 import { useTodayReminders, useCompleteReminder, useUpdateReminder, useDeleteReminder } from '@/hooks/useReminders';
 import { ReminderCard } from '@/components/reminders/ReminderCard';
 import { useAuthStore } from '@/stores/authStore';
 
 export default function TodayScreen() {
+  const insets = useSafeAreaInsets();
   const { isLoading: authLoading, user, isConnected } = useAuthStore();
   const { data: reminders, isLoading } = useTodayReminders();
   const completeMutation = useCompleteReminder();
@@ -68,30 +71,37 @@ export default function TodayScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Guest Banner */}
+      {/* Dynamic status bar - dark text for guest banner, light text for gradient header */}
+      <StatusBar style={user?.isGuest ? 'dark' : 'light'} />
+
+      {/* Guest Banner with Status Bar Background */}
       {user?.isGuest && (
-        <TouchableOpacity
-          style={styles.guestBanner}
-          onPress={() => router.push('/(tabs)/settings')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.guestBannerContent}>
-            <CloudOff size={18} color="#f59e0b" />
-            <Text style={styles.guestBannerText}>
-              Guest mode - Data stored locally only
-            </Text>
-          </View>
-          <View style={styles.guestBannerAction}>
-            <UserPlus size={16} color="#0ea5e9" />
-            <Text style={styles.guestBannerActionText}>Create Account</Text>
-          </View>
-        </TouchableOpacity>
+        <View style={styles.guestBannerWrapper}>
+          {/* Status bar background */}
+          <View style={[styles.statusBarBackground, { height: insets.top }]} />
+          <TouchableOpacity
+            style={styles.guestBanner}
+            onPress={() => router.push('/(tabs)/settings')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.guestBannerContent}>
+              <CloudOff size={18} color="#f59e0b" />
+              <Text style={styles.guestBannerText}>
+                Guest mode - Data stored locally only
+              </Text>
+            </View>
+            <View style={styles.guestBannerAction}>
+              <UserPlus size={16} color="#ffffff" />
+              <Text style={styles.guestBannerActionText}>Create Account</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Header with Gradient */}
       <LinearGradient
         colors={['#0ea5e9', '#0284c7', '#0369a1']}
-        style={styles.header}
+        style={[styles.header, user?.isGuest ? styles.headerWithBanner : { paddingTop: insets.top + 20 }]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
@@ -247,6 +257,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#f8fafc',
   },
+  guestBannerWrapper: {
+    backgroundColor: '#fffbeb',
+  },
+  statusBarBackground: {
+    backgroundColor: '#fffbeb',
+  },
   guestBanner: {
     backgroundColor: '#fffbeb',
     paddingHorizontal: 16,
@@ -271,23 +287,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 10,
+    backgroundColor: '#0ea5e9',
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
+    shadowColor: '#0ea5e9',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   guestBannerActionText: {
-    color: '#0ea5e9',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
   },
   header: {
-    paddingTop: 64,
     paddingBottom: 24,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
     overflow: 'hidden',
+  },
+  headerWithBanner: {
+    paddingTop: 20,
   },
   headerContent: {
     zIndex: 10,

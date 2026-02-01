@@ -1,0 +1,62 @@
+# Maestro E2E Test: Guest Mode Flow
+# Run with: maestro test .maestro/flows/auth-guest-flow.yaml
+
+appId: com.remindmepro.app
+---
+
+# Test: Guest mode - Create reminder flow
+- launchApp
+
+# Wait for welcome screen
+- assertVisible: "RemindMe Pro"
+
+# Tap continue as guest
+- tapOn: "Continue as Guest"
+
+# Wait for home screen
+- assertVisible: "Good"  # Greeting starts with Good morning/afternoon/evening
+
+# Verify guest banner is visible
+- assertVisible: "Guest mode"
+- assertVisible: "Create Account"
+
+# Create a new reminder
+- tapOn:
+    id: "fab-button"  # Or use coordinates if no ID
+
+# Should see create reminder screen
+- assertVisible: "New Reminder"
+
+# Fill in reminder title
+- tapOn: "What do you want to remember?"
+- inputText: "Test Reminder from Maestro"
+
+# Select time-based reminder (should be default)
+- assertVisible: "Time-based"
+
+# Set time to 1 minute from now (simplified - just create with default)
+- tapOn: "Create Reminder"
+
+# Should return to home and see the reminder
+- assertVisible: "Test Reminder from Maestro"
+
+# Complete the reminder
+- tapOn: "Test Reminder from Maestro"
+- tapOn: "Mark Complete"
+
+# Verify completion
+- assertVisible: "Completed"
+
+# Go to settings
+- tapOn: "Settings"
+
+# Verify guest mode in settings
+- assertVisible: "Guest User"
+- assertVisible: "Create Account"
+
+# Sign out
+- tapOn: "Leave Guest Mode"
+- tapOn: "Leave"
+
+# Should be back to welcome screen
+- assertVisible: "RemindMe Pro"

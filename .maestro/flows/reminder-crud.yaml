@@ -1,0 +1,75 @@
+# Maestro E2E Test: Reminder CRUD Operations
+# Run with: maestro test .maestro/flows/reminder-crud.yaml
+
+appId: com.remindmepro.app
+---
+
+# Test: Create, Read, Update (snooze), Delete reminder
+- launchApp
+
+# Start as guest for simplicity
+- tapOn: "Continue as Guest"
+- assertVisible: "Good"
+
+# ========== CREATE REMINDER ==========
+- tapOn:
+    id: "fab-button"
+
+- assertVisible: "New Reminder"
+
+# Enter title
+- tapOn: "What do you want to remember?"
+- inputText: "Buy groceries"
+
+# Add notes
+- scrollUntilVisible:
+    element: "Add notes"
+    direction: DOWN
+- tapOn: "Add notes"
+- inputText: "Milk, eggs, bread"
+
+# Create the reminder
+- tapOn: "Create Reminder"
+
+# Verify reminder appears
+- assertVisible: "Buy groceries"
+
+# ========== READ REMINDER DETAILS ==========
+- tapOn: "Buy groceries"
+
+# Should see reminder details
+- assertVisible: "Buy groceries"
+- assertVisible: "Milk, eggs, bread"
+
+# Go back
+- back
+
+# ========== SNOOZE REMINDER ==========
+# Long press or swipe to reveal actions
+- longPressOn: "Buy groceries"
+- tapOn: "Snooze"
+- tapOn: "10 minutes"
+
+# Should show snoozed confirmation
+- assertVisible: "Snoozed"
+
+# ========== DELETE REMINDER ==========
+# Create another reminder to delete
+- tapOn:
+    id: "fab-button"
+- tapOn: "What do you want to remember?"
+- inputText: "Reminder to delete"
+- tapOn: "Create Reminder"
+
+- assertVisible: "Reminder to delete"
+
+# Delete the reminder
+- longPressOn: "Reminder to delete"
+- tapOn: "Delete"
+- tapOn: "Delete"  # Confirm
+
+# Should not see the deleted reminder
+- assertNotVisible: "Reminder to delete"
+
+# Original reminder should still exist
+- assertVisible: "Buy groceries"

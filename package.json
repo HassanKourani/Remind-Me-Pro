@@ -10,7 +10,14 @@
     "build:android": "eas build --platform android --profile preview",
     "build:android:prod": "eas build --platform android --profile production",
     "prebuild": "expo prebuild",
-    "clean": "rm -rf node_modules .expo && npm install"
+    "clean": "rm -rf node_modules .expo && npm install",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:e2e": "maestro test .maestro/flows/",
+    "test:e2e:guest": "maestro test .maestro/flows/auth-guest-flow.yaml",
+    "test:e2e:crud": "maestro test .maestro/flows/reminder-crud.yaml",
+    "test:e2e:signup": "maestro test .maestro/flows/auth-signup-flow.yaml"
   },
   "dependencies": {
     "@gorhom/bottom-sheet": "^5.2.8",
@@ -26,6 +33,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "expo": "~54.0.32",
+    "expo-dev-client": "~6.0.20",
     "expo-linear-gradient": "^15.0.8",
     "expo-linking": "^8.0.11",
     "expo-location": "~19.0.8",
@@ -43,6 +51,7 @@
     "react-hook-form": "^7.71.1",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
+    "react-native-google-mobile-ads": "^16.0.3",
     "react-native-maps": "^1.20.1",
     "react-native-purchases": "^9.7.5",
     "react-native-reanimated": "~4.1.1",
@@ -57,8 +66,11 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/react": "~19.1.0",
     "@types/uuid": "^10.0.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.0",
     "typescript": "~5.9.2"
   },
   "private": true

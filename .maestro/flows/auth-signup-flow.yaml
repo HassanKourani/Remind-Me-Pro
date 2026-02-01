@@ -1,0 +1,77 @@
+# Maestro E2E Test: Sign Up Flow
+# Run with: maestro test .maestro/flows/auth-signup-flow.yaml
+
+appId: com.remindmepro.app
+---
+
+# Test: Full sign up and sign in flow
+- launchApp
+
+# Wait for welcome screen
+- assertVisible: "RemindMe Pro"
+
+# Tap Sign Up
+- tapOn: "Sign Up"
+
+# Should see registration form
+- assertVisible: "Create Account"
+
+# ========== VALIDATION TESTS ==========
+
+# Try to submit empty form
+- tapOn: "Create Account"
+- assertVisible: "Name is required"
+
+# Enter short name
+- tapOn: "Full Name"
+- inputText: "A"
+- tapOn: "Create Account"
+- assertVisible: "at least 2 characters"
+
+# Clear and enter valid name
+- clearText
+- inputText: "Test User"
+
+# Enter invalid email
+- tapOn: "Email"
+- inputText: "notanemail"
+- tapOn: "Create Account"
+- assertVisible: "valid email"
+
+# Clear and enter valid email
+- clearText
+- inputText: "testuser@example.com"
+
+# Enter short password
+- tapOn: "Password"
+- inputText: "123"
+- assertVisible: "Weak"
+
+# Password strength should update
+- clearText
+- inputText: "123456"
+- assertVisible: "Fair"
+
+- clearText
+- inputText: "Password1"
+- assertVisible: "Strong"
+
+# Enter non-matching confirm password
+- tapOn: "Confirm Password"
+- inputText: "DifferentPassword"
+- tapOn: "Create Account"
+- assertVisible: "Passwords do not match"
+
+# Clear and enter matching password
+- clearText
+- inputText: "Password1"
+- assertVisible: "Passwords match"
+
+# ========== SUCCESSFUL SIGNUP ==========
+# Note: This will fail without a real Supabase backend
+# In real tests, use a test Supabase instance
+
+- tapOn: "Create Account"
+
+# Should either succeed or show error from backend
+# (depends on Supabase configuration)

@@ -173,10 +173,12 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
               </View>
               {strength && (
-                <View style={styles.strengthRow}>
-                  <View
-                    style={[styles.strengthBar, { backgroundColor: strength.color, width: strength.width as any }]}
-                  />
+                <View style={styles.strengthContainer}>
+                  <View style={styles.strengthBarBackground}>
+                    <View
+                      style={[styles.strengthBar, { backgroundColor: strength.color, width: strength.width as any }]}
+                    />
+                  </View>
                   <Text style={[styles.strengthText, { color: strength.color }]}>
                     {strength.text}
                   </Text>
@@ -329,19 +331,27 @@ const styles = StyleSheet.create({
     top: 40,
     padding: 4,
   },
-  strengthRow: {
+  strengthContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
+    gap: 10,
+  },
+  strengthBarBackground: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 2,
+    overflow: 'hidden',
   },
   strengthBar: {
-    height: 4,
+    height: '100%',
     borderRadius: 2,
-    marginRight: 8,
   },
   strengthText: {
     fontSize: 12,
     fontWeight: '600',
+    minWidth: 45,
   },
   matchRow: {
     flexDirection: 'row',

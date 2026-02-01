@@ -13,7 +13,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0ea5e9"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.remindmepro.app",
@@ -21,7 +23,11 @@
         "NSLocationWhenInUseUsageDescription": "We need your location to create location-based reminders.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "We need background location access to trigger reminders when you arrive at or leave locations.",
         "NSLocationAlwaysUsageDescription": "We need background location access to trigger reminders when you arrive at or leave locations.",
-        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -37,7 +43,12 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "WAKE_LOCK",
-        "BILLING"
+        "BILLING",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -61,6 +72,12 @@
         {
           "color": "#0ea5e9"
         }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-5224347803460342~4908169447"
+        }
       ]
     ],
     "experiments": {
@@ -71,8 +88,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "6eda0d34-92d5-4e1c-8573-c3de4a798d35"
       }
-    }
+    },
+    "owner": "hassankourani"
   }
 }

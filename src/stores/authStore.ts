@@ -5,6 +5,7 @@ import { getDatabase } from '@/services/database/sqlite';
 import { supabase } from '@/services/supabase/client';
 import { authService } from '@/services/supabase/auth';
 import NetInfo from '@react-native-community/netinfo';
+import { checkPremiumStatus, getActiveSubscription } from '@/services/purchases/revenueCat';
 
 interface User {
   id: string;
@@ -29,6 +30,10 @@ interface AuthState {
   continueAsGuest: () => Promise<void>;
   // New: Convert guest to registered user (migrate data)
   linkGuestToAccount: (email: string, password: string, displayName: string) => Promise<void>;
+  // Update premium status (used after purchase)
+  updatePremiumStatus: (isPremium: boolean, expiresAt?: string | null) => Promise<void>;
+  // Sync premium status with RevenueCat (call on app start)
+  syncPremiumWithRevenueCat: () => Promise<void>;
 }
 
 // Helper to check if user can sync (has account and is connected)
@@ -111,12 +116,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // Fetch premium status from profile
           const { data: profile } = await supabase
             .from('profiles')
-            .select('is_premium')
+            .select('is_premium, premium_expires_at')
             .eq('id', session.user.id)
-            .single<{ is_premium: boolean }>();
+            .single<{ is_premium: boolean; premium_expires_at: string | null }>();
 
           if (profile) {
-            user.isPremium = profile.is_premium;
+            // Check if premium has expired
+            if (profile.is_premium && profile.premium_expires_at) {
+              const expiresAt = new Date(profile.premium_expires_at);
+              const now = new Date();
+
+              if (expiresAt <= now) {
+                // Premium has expired - update the database
+                console.log('Premium subscription expired, revoking access');
+                user.isPremium = false;
+
+                // Update Supabase to reflect expired status
+                await supabase
+                  .from('profiles')
+                  .update({ is_premium: false })
+                  .eq('id', session.user.id);
+              } else {
+                user.isPremium = true;
+              }
+            } else {
+              user.isPremium = profile.is_premium;
+            }
           }
         }
 
@@ -423,6 +448,140 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       set({ isLoading: false });
       throw error;
+    }
+  },
+
+  updatePremiumStatus: async (isPremium: boolean, expiresAt?: string | null) => {
+    const state = get();
+    if (!state.user) {
+      console.log('updatePremiumStatus: No user found');
+      return;
+    }
+
+    console.log('updatePremiumStatus: Starting update for user', state.user.id, 'isPremium:', isPremium, 'expiresAt:', expiresAt);
+
+    try {
+      const db = await getDatabase();
+
+      // Update local database
+      await db.runAsync(
+        'UPDATE users SET is_premium = ? WHERE id = ?',
+        [isPremium ? 1 : 0, state.user.id]
+      );
+      console.log('updatePremiumStatus: Local database updated');
+
+      // Update Supabase if not guest and connected
+      if (!state.user.isGuest && state.isConnected) {
+        console.log('updatePremiumStatus: Updating Supabase for user', state.user.id);
+
+        // Always set premium_expires_at when updating premium status
+        let finalExpiresAt: string | null = null;
+
+        if (expiresAt) {
+          finalExpiresAt = expiresAt;
+        } else if (isPremium) {
+          // If no expiration provided and is premium, set a default (1 month)
+          const defaultExpiry = new Date();
+          defaultExpiry.setMonth(defaultExpiry.getMonth() + 1);
+          finalExpiresAt = defaultExpiry.toISOString();
+        }
+
+        const updateData = {
+          is_premium: isPremium,
+          premium_expires_at: finalExpiresAt,
+        };
+
+        console.log('updatePremiumStatus: Sending to Supabase:', JSON.stringify(updateData));
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .update(updateData)
+          .eq('id', state.user.id)
+          .select();
+
+        if (error) {
+          console.error('updatePremiumStatus: Supabase error:', JSON.stringify(error));
+          // Don't throw - local update succeeded, Supabase will sync later
+        } else {
+          console.log('updatePremiumStatus: Supabase response:', JSON.stringify(data));
+        }
+      } else {
+        console.log('updatePremiumStatus: Skipping Supabase (guest:', state.user.isGuest, 'connected:', state.isConnected, ')');
+      }
+
+      // Update state
+      set({
+        user: {
+          ...state.user,
+          isPremium,
+        },
+      });
+      console.log('updatePremiumStatus: State updated, user is now premium:', isPremium);
+    } catch (error) {
+      console.error('updatePremiumStatus: Error:', error);
+      throw error;
+    }
+  },
+
+  // Sync premium status with RevenueCat (validates subscription is still active)
+  syncPremiumWithRevenueCat: async () => {
+    const state = get();
+    if (!state.user || state.user.isGuest) {
+      return; // Skip for guests
+    }
+
+    try {
+      console.log('syncPremiumWithRevenueCat: Checking subscription status...');
+
+      // Check with RevenueCat if subscription is still active
+      const isPremiumActive = await checkPremiumStatus();
+      const subscription = await getActiveSubscription();
+
+      console.log('syncPremiumWithRevenueCat: RevenueCat status:', {
+        isPremiumActive,
+        expirationDate: subscription.expirationDate,
+        willRenew: subscription.willRenew,
+      });
+
+      // If RevenueCat says premium but local says not, or vice versa - sync
+      if (isPremiumActive !== state.user.isPremium) {
+        console.log('syncPremiumWithRevenueCat: Status mismatch, updating...');
+
+        const expiresAt = subscription.expirationDate || null;
+
+        // Update local state and Supabase
+        const db = await getDatabase();
+        await db.runAsync(
+          'UPDATE users SET is_premium = ? WHERE id = ?',
+          [isPremiumActive ? 1 : 0, state.user.id]
+        );
+
+        // Update Supabase
+        if (state.isConnected) {
+          await supabase
+            .from('profiles')
+            .update({
+              is_premium: isPremiumActive,
+              premium_expires_at: expiresAt,
+            })
+            .eq('id', state.user.id);
+        }
+
+        // Update state
+        set({
+          user: {
+            ...state.user,
+            isPremium: isPremiumActive,
+          },
+        });
+
+        console.log('syncPremiumWithRevenueCat: Status synced, isPremium:', isPremiumActive);
+      } else {
+        console.log('syncPremiumWithRevenueCat: Status already in sync');
+      }
+    } catch (error) {
+      // Don't throw - this is a background sync, shouldn't block the app
+      console.error('syncPremiumWithRevenueCat: Error:', error);
     }
   },
 }));

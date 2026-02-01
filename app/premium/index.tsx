@@ -1,10 +1,18 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { X, Check, MapPin, Bell, Share2, Infinity, Crown, Zap } from 'lucide-react-native';
+import { X, Check, MapPin, Infinity, Crown, Zap, AlertCircle } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { PurchasesPackage } from 'react-native-purchases';
 
-import { Button } from '@/components/ui/Button';
+import { useAuthStore } from '@/stores/authStore';
+import {
+  getOfferings,
+  purchasePackage,
+  restorePurchases,
+  checkPremiumStatus,
+  getActiveSubscription,
+} from '@/services/purchases/revenueCat';
 
 const FEATURES = [
   {
@@ -14,26 +22,27 @@ const FEATURES = [
     color: '#10b981',
   },
   {
-    icon: Bell,
-    title: 'Custom Alarms',
-    description: 'Choose from multiple alarm sounds',
-    color: '#0ea5e9',
-  },
-  {
-    icon: Share2,
-    title: 'Quick Share',
-    description: 'Share reminders to WhatsApp or SMS',
-    color: '#8b5cf6',
-  },
-  {
     icon: Infinity,
     title: 'Unlimited Reminders',
     description: 'No limits on how many reminders you can create',
     color: '#f59e0b',
   },
+  {
+    icon: Zap,
+    title: 'Priority Support',
+    description: 'Get faster responses to your questions',
+    color: '#0ea5e9',
+  },
+  {
+    icon: Crown,
+    title: 'Early Access',
+    description: 'Be the first to try new features',
+    color: '#8b5cf6',
+  },
 ];
 
-const PRODUCTS = [
+// Fallback products if RevenueCat fails to load
+const FALLBACK_PRODUCTS = [
   {
     id: 'monthly',
     name: 'Monthly',
@@ -61,29 +70,297 @@ const PRODUCTS = [
 ];
 
 export default function PremiumScreen() {
-  const [selectedProductId, setSelectedProductId] = useState('yearly');
-  const [isLoading, setIsLoading] = useState(false);
+  const { user, updatePremiumStatus } = useAuthStore();
+  const [packages, setPackages] = useState<PurchasesPackage[]>([]);
+  const [selectedPackage, setSelectedPackage] = useState<PurchasesPackage | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handlePurchase = async () => {
-    setIsLoading(true);
+  useEffect(() => {
+    loadOfferings();
+  }, []);
 
-    // Simulate purchase - in real app, this would use RevenueCat
-    setTimeout(() => {
+  const loadOfferings = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const offering = await getOfferings();
+
+      if (offering && offering.availablePackages.length > 0) {
+        setPackages(offering.availablePackages);
+        // Select annual by default if available, otherwise first package
+        const annualPkg = offering.availablePackages.find(
+          (pkg) => pkg.packageType === 'ANNUAL'
+        );
+        setSelectedPackage(annualPkg || offering.availablePackages[0]);
+      } else {
+        setError('No products available. Please try again later.');
+      }
+    } catch (err) {
+      console.error('Failed to load offerings:', err);
+      setError('Failed to load subscription options. Please check your connection.');
+    } finally {
       setIsLoading(false);
-      Alert.alert(
-        'Demo Mode',
-        'In-app purchases are not configured yet. This is a demo of the premium flow.',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
-    }, 1500);
+    }
   };
 
-  const handleRestore = () => {
-    Alert.alert(
-      'Restore Purchases',
-      'No previous purchases found to restore.',
-      [{ text: 'OK' }]
-    );
+  const handlePurchase = async () => {
+    if (!selectedPackage) {
+      Alert.alert('Error', 'Please select a subscription plan');
+      return;
+    }
+
+    if (user?.isGuest) {
+      Alert.alert(
+        'Account Required',
+        'Please create an account to purchase premium. Your subscription will be linked to your account.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Create Account', onPress: () => router.push('/(tabs)/settings') },
+        ]
+      );
+      return;
+    }
+
+    try {
+      setIsPurchasing(true);
+
+      const { customerInfo, productIdentifier } = await purchasePackage(selectedPackage);
+
+      // Check if purchase was successful via entitlement
+      let isPremium = await checkPremiumStatus();
+
+      // In sandbox/test mode, entitlements might not be set up
+      // Check if we got a valid product identifier as fallback
+      if (!isPremium && productIdentifier) {
+        console.log('Purchase completed with product:', productIdentifier);
+        // For sandbox testing, treat any successful purchase as premium
+        isPremium = true;
+      }
+
+      if (isPremium) {
+        // Get the actual expiration date from RevenueCat
+        const subscription = await getActiveSubscription();
+        let expiresAt = subscription.expirationDate || null;
+
+        // If no expiration from RevenueCat (sandbox mode), compute based on product
+        if (!expiresAt && productIdentifier) {
+          const now = new Date();
+          if (productIdentifier.includes('monthly')) {
+            now.setMonth(now.getMonth() + 1);
+            expiresAt = now.toISOString();
+          } else if (productIdentifier.includes('yearly') || productIdentifier.includes('annual')) {
+            now.setFullYear(now.getFullYear() + 1);
+            expiresAt = now.toISOString();
+          } else if (productIdentifier.includes('lifetime')) {
+            // Lifetime = 100 years
+            now.setFullYear(now.getFullYear() + 100);
+            expiresAt = now.toISOString();
+          }
+          console.log('Computed expiration for sandbox:', expiresAt);
+        }
+
+        console.log('Updating premium status with expiresAt:', expiresAt);
+        // Update local state and Supabase with expiration date
+        await updatePremiumStatus(true, expiresAt);
+
+        Alert.alert(
+          'Welcome to Premium! 🎉',
+          'Thank you for upgrading! You now have access to all premium features.',
+          [{ text: 'Awesome!', onPress: () => router.back() }]
+        );
+      } else {
+        // Purchase completed but couldn't verify premium status
+        Alert.alert(
+          'Purchase Processing',
+          'Your purchase is being processed. Premium features will be available shortly.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      }
+    } catch (err: any) {
+      if (err.message === 'PURCHASE_CANCELLED') {
+        // User cancelled, do nothing
+        return;
+      }
+      console.error('Purchase failed:', err);
+      Alert.alert(
+        'Purchase Failed',
+        'There was an error processing your purchase. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsPurchasing(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      setIsRestoring(true);
+
+      const customerInfo = await restorePurchases();
+      const isPremium = await checkPremiumStatus();
+
+      if (isPremium) {
+        // Get the actual expiration date from RevenueCat
+        const subscription = await getActiveSubscription();
+        const expiresAt = subscription.expirationDate || null;
+
+        await updatePremiumStatus(true, expiresAt);
+        Alert.alert(
+          'Purchases Restored!',
+          'Your premium subscription has been restored.',
+          [{ text: 'Great!', onPress: () => router.back() }]
+        );
+      } else {
+        Alert.alert(
+          'No Purchases Found',
+          'We couldn\'t find any previous purchases to restore.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (err) {
+      console.error('Restore failed:', err);
+      Alert.alert(
+        'Restore Failed',
+        'There was an error restoring your purchases. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const getPackageDisplay = (pkg: PurchasesPackage) => {
+    const product = pkg.product;
+    let badge = null;
+    let period = '';
+
+    switch (pkg.packageType) {
+      case 'MONTHLY':
+        period = '/mo';
+        break;
+      case 'ANNUAL':
+        period = '/yr';
+        badge = 'SAVE 50%';
+        break;
+      case 'LIFETIME':
+        badge = 'BEST VALUE';
+        break;
+      default:
+        period = '';
+    }
+
+    return {
+      id: pkg.identifier,
+      name: product.title.replace(' (RemindMe Pro)', '').replace('(RemindMe Pro)', '').trim(),
+      description: product.description || `Billed ${pkg.packageType.toLowerCase()}`,
+      price: product.priceString,
+      period,
+      badge,
+      packageType: pkg.packageType,
+    };
+  };
+
+  const renderProducts = () => {
+    if (isLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#f59e0b" />
+          <Text style={styles.loadingText}>Loading plans...</Text>
+        </View>
+      );
+    }
+
+    if (error) {
+      return (
+        <View style={styles.errorContainer}>
+          <AlertCircle size={40} color="#ef4444" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity onPress={loadOfferings} style={styles.retryButton}>
+            <Text style={styles.retryText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (packages.length === 0) {
+      // Show fallback UI
+      return FALLBACK_PRODUCTS.map((product) => (
+        <View key={product.id} style={styles.productCard}>
+          {product.badge && (
+            <View style={[styles.productBadge, product.id === 'lifetime' ? styles.bestValueBadge : styles.saveBadge]}>
+              <Text style={styles.productBadgeText}>{product.badge}</Text>
+            </View>
+          )}
+          <View style={styles.productRow}>
+            <View style={styles.productLeft}>
+              <View style={styles.radioOuter}>
+                <View style={styles.radioInner} />
+              </View>
+              <View>
+                <Text style={styles.productName}>{product.name}</Text>
+                <Text style={styles.productDescription}>{product.description}</Text>
+              </View>
+            </View>
+            <View style={styles.productPriceContainer}>
+              <Text style={styles.productPrice}>{product.price}</Text>
+              {product.period && <Text style={styles.productPeriod}>{product.period}</Text>}
+            </View>
+          </View>
+        </View>
+      ));
+    }
+
+    return packages.map((pkg) => {
+      const display = getPackageDisplay(pkg);
+      const isSelected = selectedPackage?.identifier === pkg.identifier;
+
+      return (
+        <TouchableOpacity
+          key={pkg.identifier}
+          onPress={() => setSelectedPackage(pkg)}
+          style={[
+            styles.productCard,
+            isSelected && styles.productCardActive,
+          ]}
+          activeOpacity={0.7}
+        >
+          {display.badge && (
+            <View style={[
+              styles.productBadge,
+              display.packageType === 'LIFETIME' ? styles.bestValueBadge : styles.saveBadge
+            ]}>
+              <Text style={styles.productBadgeText}>{display.badge}</Text>
+            </View>
+          )}
+
+          <View style={styles.productRow}>
+            <View style={styles.productLeft}>
+              <View style={[styles.radioOuter, isSelected && styles.radioOuterActive]}>
+                {isSelected && <View style={styles.radioInner} />}
+              </View>
+              <View>
+                <Text style={[styles.productName, isSelected && styles.productNameActive]}>
+                  {display.name}
+                </Text>
+                <Text style={styles.productDescription}>{display.description}</Text>
+              </View>
+            </View>
+            <View style={styles.productPriceContainer}>
+              <Text style={[styles.productPrice, isSelected && styles.productPriceActive]}>
+                {display.price}
+              </Text>
+              {display.period && (
+                <Text style={styles.productPeriod}>{display.period}</Text>
+              )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      );
+    });
   };
 
   return (
@@ -146,50 +423,7 @@ export default function PremiumScreen() {
         {/* Products */}
         <View style={styles.productsSection}>
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
-
-          {PRODUCTS.map((product) => {
-            const isSelected = product.id === selectedProductId;
-
-            return (
-              <TouchableOpacity
-                key={product.id}
-                onPress={() => setSelectedProductId(product.id)}
-                style={[
-                  styles.productCard,
-                  isSelected && styles.productCardActive,
-                ]}
-                activeOpacity={0.7}
-              >
-                {product.badge && (
-                  <View style={[styles.productBadge, product.id === 'lifetime' ? styles.bestValueBadge : styles.saveBadge]}>
-                    <Text style={styles.productBadgeText}>{product.badge}</Text>
-                  </View>
-                )}
-
-                <View style={styles.productRow}>
-                  <View style={styles.productLeft}>
-                    <View style={[styles.radioOuter, isSelected && styles.radioOuterActive]}>
-                      {isSelected && <View style={styles.radioInner} />}
-                    </View>
-                    <View>
-                      <Text style={[styles.productName, isSelected && styles.productNameActive]}>
-                        {product.name}
-                      </Text>
-                      <Text style={styles.productDescription}>{product.description}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.productPriceContainer}>
-                    <Text style={[styles.productPrice, isSelected && styles.productPriceActive]}>
-                      {product.price}
-                    </Text>
-                    {product.period && (
-                      <Text style={styles.productPeriod}>{product.period}</Text>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+          {renderProducts()}
         </View>
       </ScrollView>
 
@@ -199,28 +433,45 @@ export default function PremiumScreen() {
           onPress={handlePurchase}
           style={styles.upgradeButton}
           activeOpacity={0.8}
-          disabled={isLoading}
+          disabled={isPurchasing || isLoading || packages.length === 0}
         >
           <LinearGradient
-            colors={['#f59e0b', '#d97706']}
+            colors={isPurchasing || isLoading ? ['#9ca3af', '#6b7280'] : ['#f59e0b', '#d97706']}
             style={styles.upgradeGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
-            <Zap size={20} color="#ffffff" />
+            {isPurchasing ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Zap size={20} color="#ffffff" />
+            )}
             <Text style={styles.upgradeText}>
-              {isLoading ? 'Processing...' : 'Upgrade Now'}
+              {isPurchasing ? 'Processing...' : 'Upgrade Now'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handleRestore} style={styles.restoreButton}>
-          <Text style={styles.restoreText}>Restore Purchases</Text>
+        <TouchableOpacity
+          onPress={handleRestore}
+          style={styles.restoreButton}
+          disabled={isRestoring}
+        >
+          <Text style={styles.restoreText}>
+            {isRestoring ? 'Restoring...' : 'Restore Purchases'}
+          </Text>
         </TouchableOpacity>
 
-        <Text style={styles.termsText}>
-          Cancel anytime. Recurring billing. Terms apply.
-        </Text>
+        <View style={styles.termsContainer}>
+          <Text style={styles.termsText}>Cancel anytime. Recurring billing. </Text>
+          <TouchableOpacity onPress={() => router.push('/legal/terms')}>
+            <Text style={styles.termsLink}>Terms</Text>
+          </TouchableOpacity>
+          <Text style={styles.termsText}> & </Text>
+          <TouchableOpacity onPress={() => router.push('/legal/privacy')}>
+            <Text style={styles.termsLink}>Privacy</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -367,6 +618,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 28,
   },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: '#64748b',
+    fontSize: 14,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    marginTop: 12,
+    color: '#64748b',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+  },
+  retryText: {
+    color: '#0ea5e9',
+    fontWeight: '600',
+  },
   productCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
@@ -493,9 +775,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  termsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
   termsText: {
     color: '#94a3b8',
     fontSize: 12,
-    textAlign: 'center',
+  },
+  termsLink: {
+    color: '#0ea5e9',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

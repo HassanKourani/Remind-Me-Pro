@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, StyleSheet } from 'react-native';
-import { router, Stack } from 'expo-router';
+import { router } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Clock, MapPin, Bell, Volume2, Share2, Calendar, AlertCircle, CheckCircle2, LogIn, LogOut, ArrowLeftRight, X, Plus } from 'lucide-react-native';
+import { Clock, MapPin, Bell, Calendar, AlertCircle, CheckCircle2, LogIn, LogOut, ArrowLeftRight, X, Plus, Tag, Briefcase, ShoppingCart, Heart, Home, Star } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format, addHours } from 'date-fns';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { LocationPicker } from '@/components/location/LocationPicker';
 import { useCreateReminder } from '@/hooks/useReminders';
 import { useAuthStore } from '@/stores/authStore';
+import { showInterstitialAd, loadInterstitialAd } from '@/services/ads/adService';
 
 const reminderSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -29,9 +30,19 @@ const reminderSchema = z.object({
   // Other fields
   deliveryMethod: z.enum(['notification', 'alarm', 'share']),
   priority: z.enum(['low', 'medium', 'high']),
+  category: z.string().optional(),
 });
 
 type ReminderFormData = z.infer<typeof reminderSchema>;
+
+// Pre-defined categories for V1
+const CATEGORIES = [
+  { id: 'personal', name: 'Personal', icon: Star, color: '#0ea5e9' },
+  { id: 'work', name: 'Work', icon: Briefcase, color: '#8b5cf6' },
+  { id: 'shopping', name: 'Shopping', icon: ShoppingCart, color: '#10b981' },
+  { id: 'health', name: 'Health', icon: Heart, color: '#ef4444' },
+  { id: 'home', name: 'Home', icon: Home, color: '#f59e0b' },
+];
 
 export default function CreateReminderScreen() {
   const createReminder = useCreateReminder();
@@ -41,6 +52,13 @@ export default function CreateReminderScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(addHours(new Date(), 1));
+
+  // Preload ad when screen mounts (for non-premium users)
+  useEffect(() => {
+    if (!isPremium) {
+      loadInterstitialAd();
+    }
+  }, [isPremium]);
 
   const {
     control,
@@ -61,9 +79,9 @@ export default function CreateReminderScreen() {
   });
 
   const watchType = watch('type');
-  const watchDeliveryMethod = watch('deliveryMethod');
   const watchPriority = watch('priority');
   const watchTriggerOn = watch('triggerOn');
+  const watchCategory = watch('category');
 
   const onSubmit = async (data: ReminderFormData) => {
     try {
@@ -88,6 +106,10 @@ export default function CreateReminderScreen() {
         deliveryMethod: data.deliveryMethod,
         priority: data.priority,
       });
+
+      // Show interstitial ad for non-premium users (with 5 min cooldown)
+      await showInterstitialAd(isPremium);
+
       router.back();
     } catch (error) {
       Alert.alert('Error', 'Failed to create reminder. Please try again.');
@@ -148,10 +170,7 @@ export default function CreateReminderScreen() {
   ];
 
   return (
-    <>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={styles.container}>
+    <View style={styles.container}>
         {/* Gradient Header */}
         <LinearGradient
           colors={['#0ea5e9', '#0284c7', '#0369a1']}
@@ -419,64 +438,42 @@ export default function CreateReminderScreen() {
           </>
         )}
 
-        {/* Delivery Method */}
+        {/* Delivery Method - Hidden for V1, only notification available */}
+        {/* TODO: Re-enable alarm and share options in future version */}
+
+        {/* Category */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>How to notify?</Text>
-          <View style={styles.deliveryRow}>
-            {[
-              { value: 'notification', icon: Bell, label: 'Push', premiumOnly: false, color: '#0ea5e9' },
-              { value: 'alarm', icon: Volume2, label: 'Alarm', premiumOnly: true, color: '#8b5cf6' },
-              { value: 'share', icon: Share2, label: 'Share', premiumOnly: true, color: '#10b981' },
-            ].map((method) => {
-              const isLocked = method.premiumOnly && !isPremium;
-              const isSelected = watchDeliveryMethod === method.value;
+          <Text style={styles.sectionLabel}>Category (optional)</Text>
+          <View style={styles.categoryRow}>
+            {CATEGORIES.map((cat) => {
+              const isSelected = watchCategory === cat.id;
+              const Icon = cat.icon;
 
               return (
                 <TouchableOpacity
-                  key={method.value}
-                  onPress={() => {
-                    if (isLocked) {
-                      Alert.alert(
-                        'Premium Feature',
-                        'This delivery method is available with Premium.',
-                        [
-                          { text: 'Not Now', style: 'cancel' },
-                          { text: 'Upgrade', onPress: () => router.push('/premium') },
-                        ]
-                      );
-                    } else {
-                      setValue('deliveryMethod', method.value as 'notification' | 'alarm' | 'share');
-                    }
-                  }}
+                  key={cat.id}
+                  onPress={() => setValue('category', isSelected ? undefined : cat.id)}
                   style={[
-                    styles.deliveryCard,
-                    isSelected && { borderColor: '#0ea5e9', backgroundColor: '#f0f9ff' },
+                    styles.categoryCard,
+                    isSelected && { borderColor: cat.color, backgroundColor: `${cat.color}10` },
                   ]}
                   activeOpacity={0.7}
                 >
-                  {isLocked && (
-                    <View style={styles.deliveryProBadge}>
-                      <Text style={styles.deliveryProText}>PRO</Text>
-                    </View>
-                  )}
                   <View
                     style={[
-                      styles.deliveryIcon,
-                      { backgroundColor: isSelected ? `${method.color}15` : '#f1f5f9' },
+                      styles.categoryIcon,
+                      { backgroundColor: isSelected ? `${cat.color}20` : '#f1f5f9' },
                     ]}
                   >
-                    <method.icon
-                      size={22}
-                      color={isSelected ? method.color : '#64748b'}
-                    />
+                    <Icon size={18} color={isSelected ? cat.color : '#64748b'} />
                   </View>
                   <Text
                     style={[
-                      styles.deliveryLabel,
-                      { color: isSelected ? method.color : '#64748b' },
+                      styles.categoryLabel,
+                      { color: isSelected ? cat.color : '#64748b' },
                     ]}
                   >
-                    {method.label}
+                    {cat.name}
                   </Text>
                 </TouchableOpacity>
               );
@@ -532,7 +529,6 @@ export default function CreateReminderScreen() {
           </View>
         </ScrollView>
       </View>
-    </>
   );
 }
 
@@ -786,45 +782,33 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     textAlign: 'center',
   },
-  deliveryRow: {
+  categoryRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
-  deliveryCard: {
-    flex: 1,
+  categoryCard: {
+    width: '30%',
     backgroundColor: '#ffffff',
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 8,
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#e2e8f0',
   },
-  deliveryProBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    backgroundColor: '#f59e0b',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  deliveryProText: {
-    color: '#ffffff',
-    fontSize: 8,
-    fontWeight: '700',
-  },
-  deliveryIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  categoryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  deliveryLabel: {
-    fontSize: 14,
+  categoryLabel: {
+    fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   priorityRow: {
     flexDirection: 'row',
